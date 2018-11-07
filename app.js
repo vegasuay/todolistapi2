@@ -3,6 +3,7 @@ const bodyParser = require('body-parser');
 const passport = require('passport');
 const session = require('express-session');
 
+// load routes
 const todos   = require('./routes/todo');
 const users   = require('./routes/user');
 const clients = require('./routes/client');
@@ -11,7 +12,7 @@ const oauth2  = require('./routes/oauth2');
 const app = express();
 
 // conexion bbdd
-let db = require('./models/bd');
+const db = require('./models/bd');
 
 app.set("view engine","jade");
 
@@ -40,7 +41,7 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 // Use express session support since OAuth2orize requires it
 app.use(session({
-    secret: 'Super Secret Session Key',
+    secret: 'Wsxcde10',
     saveUninitialized: true,
     resave: true
 }));

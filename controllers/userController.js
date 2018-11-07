@@ -1,4 +1,4 @@
-const User = require('./../models/user');
+const User = require('./../models/auth/user');
 
 // endpoint /api/users 
 exports.newUser = (req, res) => {

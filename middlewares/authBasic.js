@@ -1,7 +1,7 @@
 // load packages
 const passport = require('passport');
 const basicStrategy = require('passport-http').BasicStrategy;
-const User = require('../models/user');
+const User = require('../models/auth/user');
 
 /**
  * Ejemplo de uso para BasicStrategy

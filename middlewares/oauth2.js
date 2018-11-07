@@ -1,133 +1,136 @@
 const oauth2orize = require('oauth2orize');
-const identifiers = require('./../helpers/identifiers');
+const crypto = require('crypto');
+const config = require('./../config');
+const User = require('./../models/auth/user');
+const AccessToken = require('./../models/auth/accessToken');
+const RefreshToken = require('./../models/auth/refreshToken');
 
-const Client       = require('../models/client');
-const AccessToken  = require('../models/accessToken');
-const RefreshToken = require('../models/refreshToken');
-
-// Create OAuth 2.0 server
+// create OAuth 2.0 server
 const server = oauth2orize.createServer();
 
-// Register serialialization function
-server.serializeClient(
-    (client, callback) => {
-        return callback(null, client._id);
-});
+// Generic error handler
+const errFn = function (cb, err) {
+	if (err) {
+		return cb(err);
+	}
+};
 
-// Register deserialization function
-server.deserializeClient(
-    (id, callback) => {
-        Client.findOne({
-            _id: id
-        },
-        (err, client) => {
-            if (err) { return callback(err); }
+// Destroys any old tokens and generates a new access and refresh token
+const generateTokens = function (data, done) {
 
-            return callback(null, client);
-        });
-});
+	// curries in `done` callback so we don't need to pass it
+	let errorHandler = errFn.bind(undefined, done),
+		refreshToken,
+		refreshTokenValue,
+		token,
+		tokenValue;
 
-// Register authorization RefreshToken grant type
-server.grant(oauth2orize.grant.code(
-    (client, redirectUri, user, scope, callback) => {
-    // Create a new authorization code
-    let code = new RefreshToken({
-      value: identifiers.uid (16),
-      clientId: client._id,
-      redirectUri: redirectUri,
-      userId: user._id
-    });
-  
-    // Save the auth code and check for errors
-    code.save(function(err) {
-        if (err) { return callback(err); }
-  
-        callback(null, code.value);
-    });
-  }));
+	RefreshToken.remove(data, errorHandler);
+	AccessToken.remove(data, errorHandler);
 
-// Exchange authorization codes for access tokens
-server.exchange(oauth2orize.exchange.code(
-    (client, refreshToken, redirectUri, callback) => {
-        RefreshToken.findOne({
-            value: refreshToken
-        },
-        (err, authRefreshToken) => {
-            if (err) { return callback(err); }
-            if (authRefreshToken === undefined) { return callback(null, false); }
-            if (client._id.toString() !== authRefreshToken.clientId) { return callback(null, false); }
-            if (redirectUri !== authRefreshToken.redirectUri) { return callback(null, false); }
+	tokenValue = crypto.randomBytes(32).toString('hex');
+	refreshTokenValue = crypto.randomBytes(32).toString('hex');
 
-            // Delete auth code now that it has been used
-            authRefreshToken.remove(
-                (err) => {
-                    if(err) { return callback(err); }
+	data.token = tokenValue;
+	token = new AccessToken(data);
 
-                    // Create a new access token
-                    let accessToken = new AccessToken({
-                        value: identifiers.uid(256),
-                        clientId: authRefreshToken.clientId,
-                        userId: authRefreshToken.userId
-                    });
+	data.token = refreshTokenValue;
+	refreshToken = new RefreshToken(data);
 
-                    // Save the access token and check for errors
-                    accessToken.save(
-                        (err) => {
-                            if (err) { return callback(err); }
+	refreshToken.save(errorHandler);
 
-                            callback(null, accessToken);
-                });
-            });
-        });
-    }
-));
+	token.save(
+		(err) => {
+			if (err) {
+				console.log(err);
+				return done(err);
+			}
+			done(null, tokenValue, refreshTokenValue, {
+				'expires_in': config.get('security:tokenLife')
+			});
+		});
+};
 
-/**
- * User authorization endpoint
- * his endpoint, initializes a new authorization transaction. It finds the 
- * client requesting access to the user’s account and then renders the dialog 
- * ejs view we created eariler.
- */
-exports.authorization = [
-    server.authorization(
-        (clientId, redirectUri, callback) => {
-            Client.findOne({
-                id: clientId
-            },
-            (err, client) => {
-                if (err) { return callback(err); }
+// Exchange username & password for access token.
+server.exchange(oauth2orize.exchange.password(
+	(client, username, password, scope, done) => {
 
-                return callback(null, client, redirectUri);
-            });
-        }
-    ),
-    (req, res) => {
-        res.status(200).json({
-            transactionID: req.oauth2.transactionID, 
-            user: req.user, 
-            client: req.oauth2.client
-        });
-    }
-];
+		User.findOne({
+				username: username
+			},
+			(err, user) => {
+				if (err) {
+					return done(err);
+				}
+				if (!user) {
+					return done(null, false);
+				}
 
-/** 
- * User decision endpoint
- * This endpoint is setup to handle when the user either grants or denies access 
- * to their account to the requesting application client. 
- * The server.decision() function handles the data submitted by the post and 
- * will call the server.grant() function if the user granted access.
-*/
-exports.decision = [
-    server.decision()
-];
+				//check password
+				user.verifyPassword(password,
+					(err, isMatch) => {
+						if (err) {
+							return done(err);
+						}
 
-/** 
- * Application client token exchange endpoint
- * This endpoint is setup to handle the request made by the application client 
- * after they have been granted an authorization code by the user. 
- * The server.token() function will initiate a call to the server.exchange() 
-*/
+						//password did not match
+						if (!isMatch) {
+							return done(null, false);
+						}
+
+						//success
+						let model = {
+							userId: user.id,
+							clientId: client.id
+						};
+
+						generateTokens(model, done);
+					});
+			});
+
+	}));
+
+// Exchange refreshToken for access token.
+server.exchange(oauth2orize.exchange.refreshToken(
+	(client, refreshToken, scope, done) => {
+
+		RefreshToken.findOne({
+			token: refreshToken,
+			clientId: client.clientId
+		}, function (err, token) {
+			if (err) {
+				return done(err);
+			}
+
+			if (!token) {
+				return done(null, false);
+			}
+
+			User.findById(token.userId, function (err, user) {
+				if (err) {
+					return done(err);
+				}
+				if (!user) {
+					return done(null, false);
+				}
+
+				var model = {
+					userId: user.id,
+					clientId: client.id
+				};
+
+				generateTokens(model, done);
+			});
+		});
+	}));
+
+// token endpoint
+//
+// `token` middleware handles client requests to exchange authorization grants
+// for access tokens.  Based on the grant type being exchanged, the above
+// exchange middleware will be invoked to handle the request.  Clients must
+// authenticate when making requests to this endpoint.
 exports.token = [
-    server.token(),
-    server.errorHandler()
+	server.token(),
+	server.errorHandler()
 ];

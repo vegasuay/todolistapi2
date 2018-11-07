@@ -3,6 +3,10 @@ const bearerStrategy = require('passport-http-bearer').Strategy;
 const Token = require('../models/accessToken');
 const Client  = require('../models/client');
 
+/**
+ * Ejemplo de uso para BearerStrategy
+ * con autenticacion por token
+ */
 passport.use('bearer', new bearerStrategy(
     (accessToken, callback) => {
         Token.findOne({

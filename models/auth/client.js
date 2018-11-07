@@ -45,4 +45,14 @@ ClientSchema.pre('save', function(callback){
 
 });
 
+// Verify password
+ClientSchema.methods.verifyPassword = function(password, cb){
+    bcrypt.compare(password, this.secret,
+        (err, isMatch) => {
+            if (err) return cb(err);
+            cb(null, isMatch);
+        }
+    );
+};
+
 module.exports = mongoose.model('Client', ClientSchema);

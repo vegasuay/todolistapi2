@@ -1,4 +1,4 @@
-const Client = require('./../models/client');
+const Client = require('./../models/auth/client');
 
 // Create endpoint /api/client for POST
 exports.newClient = (req, res) => {
